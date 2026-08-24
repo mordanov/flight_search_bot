@@ -312,7 +312,15 @@ async def _run_single_search(
                 options=[],
                 sources=[],
             )
-        return _parse_result(raw_text)
+        result = _parse_result(raw_text)
+        logger.info(
+            "OpenAI parsed: destinations=%s, status=%s, options=%d, message=%s",
+            destination_group, result.status, len(result.options), result.message,
+        )
+        for opt in result.options:
+            if getattr(opt, "notes", None):
+                logger.info("  option %d notes: %s", opt.rank, opt.notes)
+        return result
 
     except ValidationError as exc:
         logger.error(
