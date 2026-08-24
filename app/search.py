@@ -99,6 +99,25 @@ routes and flag it as a self-transfer risk.
 outside Russia. If the cheapest option is only bookable directly on a Russian \
 carrier's site, say so explicitly in "notes" so the traveller knows they cannot \
 simply pay online from the EU.
+
+MINIMUM SEARCH EFFORT REQUIRED — this corridor is hard by design; the obvious first \
+search is EXPECTED to come back empty, that is not a valid basis to conclude no fares \
+exist:
+- Before you are allowed to return "not_available_yet" or "schedule_only" for this \
+destination, you MUST have actually attempted, in this session:
+    1. At least one search on Aviasales or Kiwi.com covering this route.
+    2. At least one search on the website of a carrier that actually flies this \
+corridor (e.g. Turkish Airlines, Air Serbia, flydubai, Qatar Airways) via one of the \
+hubs listed above.
+  If you have not done both of these, you are not done — keep searching before \
+concluding no fares exist.
+- A search budget of 6-10 tool calls for this destination is expected and normal. \
+"Efficient" means not repeating the same failed query, not stopping after 1-2 calls.
+- Do NOT use generic boilerplate like "no flights found, check closer to departure" as \
+your message or notes. State specifically what you searched and why it came back empty \
+or what you found, e.g. "Checked Aviasales and Kiwi.com via IST and DXB routings for \
+18 Apr-18 May 2027: no fares published yet as of search date" or "Checked Turkish \
+Airlines direct: schedule exists but booking window not yet open for these dates."
 """
 
 
@@ -260,6 +279,10 @@ async def _run_single_search(
                 destination_group,
                 len(input_text),
             )
+            # NOTE: for hard/restricted corridors, "low" context size often means the
+            # model only skims search snippets and never actually reads far enough
+            # into an aggregator page to find a fare. Prefer "high" in config for
+            # this use case, even though it costs more per call.
             response = await client.responses.create(
                 model=config.openai_model,
                 tools=[
