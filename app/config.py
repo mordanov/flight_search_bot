@@ -12,6 +12,7 @@ class Config(BaseSettings):
     watch_send_minute: int = 0
     watch_timezone: str = "Europe/Madrid"
     allowed_telegram_user_ids: str = ""
+    max_profiles_per_user: int = 5
 
     @field_validator("openai_search_context_size")
     @classmethod

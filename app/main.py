@@ -5,6 +5,10 @@ Commands:
   /start         Welcome + show current profile
   /search        Run immediate search
   /profile       Show full search profile
+  /language      Switch language (EN/RU)
+  /profiles      Manage search profiles
+  /rename        Rename active profile
+  /delete_profile Delete active profile
   /set_origins   Set departure airports (IATA codes)
   /set_destinations  Set destination airports
   /set_dates     Set outbound date window
@@ -26,15 +30,17 @@ Optional:
   WATCH_SEND_MINUTE (default: 0)
   WATCH_TIMEZONE (default: Europe/Madrid)
   ALLOWED_TELEGRAM_USER_IDS (comma-separated; empty = allow all)
+  MAX_PROFILES_PER_USER (default: 5)
 """
 
 import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
 )
@@ -44,6 +50,7 @@ from app.config import config
 from app.formatting import format_profile, format_search_result, format_watch_status
 from app.models import SearchProfile
 from app.search import run_search
+from app.strings import t
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,6 +62,10 @@ _BOT_COMMANDS = [
     BotCommand("start", "Welcome + show search profile"),
     BotCommand("search", "Run a flight search now"),
     BotCommand("profile", "Show your search profile"),
+    BotCommand("language", "Switch language / Сменить язык"),
+    BotCommand("profiles", "Manage search profiles"),
+    BotCommand("rename", "Rename active profile"),
+    BotCommand("delete_profile", "Delete active profile"),
     BotCommand("set_origins", "Set departure airports, e.g. /set_origins MAD VLC"),
     BotCommand("set_destinations", "Set destination airports, e.g. /set_destinations SVO DME"),
     BotCommand("set_dates", "Set outbound date window, e.g. /set_dates 2027-06-24 2027-07-31"),
@@ -65,32 +76,6 @@ _BOT_COMMANDS = [
     BotCommand("unwatch", "Disable monitoring"),
     BotCommand("help", "Show command reference"),
 ]
-
-_HELP_TEXT = """
-✈️ *Flight Search Bot*
-
-*Commands:*
-/start — welcome + profile summary
-/search — run a search now
-/profile — show full search profile
-
-*Configure your search:*
-/set\\_origins MAD VLC ALC — departure airports (IATA)
-/set\\_destinations SVO DME KZN — destination airports
-/set\\_dates 2027-06-24 2027-07-31 — outbound date window
-/set\\_trip 18 23 — trip length min/max in days
-/set\\_passengers 2 5,9 — adults + comma-separated child ages
-
-*Monitoring:*
-/watch — enable daily search (runs every day at 9:00 Europe/Madrid)
-/watches — show monitoring status
-/unwatch — disable monitoring
-
-*Notes:*
-• Configure origins, destinations, and dates before searching.
-• The bot uses AI with live web search — a search may take a minute or two.
-• Prices are sourced from the web and verified by AI. Always confirm on the booking site.
-""".strip()
 
 
 def _is_allowed(user_id: int) -> bool:
@@ -109,95 +94,211 @@ def _get_profile(row: dict) -> SearchProfile:
     return db.row_to_profile(row)
 
 
+def _lang(row: dict) -> str:
+    return row.get("language", "en")
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
     row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     profile = _get_profile(row)
-    welcome = "✈️ *Flight Search Bot*\n\nFind the cheapest flights for any route, configured to your needs.\n\n"
     await update.message.reply_text(
-        welcome + format_profile(profile), parse_mode="Markdown"
+        t("start_welcome", lang) + format_profile(profile, lang),
+        parse_mode="Markdown",
     )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
-    await update.message.reply_text(_HELP_TEXT, parse_mode="Markdown")
+    row = db.get_or_create_user(update.effective_chat.id)
+    await update.message.reply_text(t("help_text", _lang(row)), parse_mode="Markdown")
 
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
     row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     profile = _get_profile(row)
-    await update.message.reply_text(format_profile(profile), parse_mode="Markdown")
+    await update.message.reply_text(format_profile(profile, lang), parse_mode="Markdown")
+
+
+async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_auth(update):
+        return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+        InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+    ]])
+    await update.message.reply_text(t("language_prompt", lang), reply_markup=keyboard)
+
+
+async def cb_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    lang_code = query.data[len("lang_"):]
+    db.set_language(chat_id, lang_code)
+    key = "language_set_en" if lang_code == "en" else "language_set_ru"
+    await query.edit_message_text(t(key, lang_code))
+
+
+async def cmd_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_auth(update):
+        return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
+    active_slot = row.get("active_profile_slot", 1)
+    profiles = db.get_all_profiles(update.effective_chat.id)
+    buttons = []
+    for p in profiles:
+        label = f"🔵 {p['name']}" if p["slot"] == active_slot else p["name"]
+        buttons.append([InlineKeyboardButton(label, callback_data=f"profile_select_{p['slot']}")])
+    if len(profiles) < config.max_profiles_per_user:
+        buttons.append([InlineKeyboardButton(t("profiles_add_button", lang), callback_data="profile_new")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(t("profiles_header", lang), reply_markup=keyboard)
+
+
+async def cb_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    row = db.get_or_create_user(chat_id)
+    lang = _lang(row)
+
+    if query.data == "profile_new":
+        profiles = db.get_all_profiles(chat_id)
+        if len(profiles) >= config.max_profiles_per_user:
+            await query.edit_message_text(t("profile_limit_reached", lang, max=config.max_profiles_per_user))
+            return
+        existing_slots = {p["slot"] for p in profiles}
+        slot = next(s for s in range(1, config.max_profiles_per_user + 1) if s not in existing_slots)
+        name = f"Profile {slot}"
+        db.create_profile(chat_id, slot, name)
+        db.set_active_profile(chat_id, slot)
+        await query.edit_message_text(t("profile_created", lang, name=name), parse_mode="Markdown")
+        return
+
+    if query.data.startswith("profile_select_"):
+        slot = int(query.data[len("profile_select_"):])
+        active_slot = row.get("active_profile_slot", 1)
+        if slot == active_slot:
+            return
+        db.set_active_profile(chat_id, slot)
+        profiles = db.get_all_profiles(chat_id)
+        name = next((p["name"] for p in profiles if p["slot"] == slot), f"Profile {slot}")
+        await query.edit_message_text(t("profile_switched", lang, name=name), parse_mode="Markdown")
+
+
+async def cmd_rename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_auth(update):
+        return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
+    if not context.args:
+        await update.message.reply_text(t("rename_usage", lang))
+        return
+    name = " ".join(context.args).strip()
+    slot = row.get("active_profile_slot", 1)
+    db.update_profile(update.effective_chat.id, slot, name=name)
+    await update.message.reply_text(t("profile_renamed", lang, name=name), parse_mode="Markdown")
+
+
+async def cmd_delete_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_auth(update):
+        return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
+    profiles = db.get_all_profiles(update.effective_chat.id)
+    if len(profiles) <= 1:
+        await update.message.reply_text(t("cant_delete_last_profile", lang))
+        return
+    active_slot = row.get("active_profile_slot", 1)
+    deleted_name = next((p["name"] for p in profiles if p["slot"] == active_slot), f"Profile {active_slot}")
+    db.delete_profile(update.effective_chat.id, active_slot)
+    remaining = db.get_all_profiles(update.effective_chat.id)
+    new_slot = remaining[0]["slot"]
+    new_name = remaining[0]["name"]
+    db.set_active_profile(update.effective_chat.id, new_slot)
+    await update.message.reply_text(
+        t("profile_deleted", lang, name=deleted_name, active=new_name),
+        parse_mode="Markdown",
+    )
 
 
 async def cmd_set_origins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     if not context.args:
-        await update.message.reply_text("Usage: /set_origins MAD VLC ALC AGP")
+        await update.message.reply_text(t("usage_set_origins", lang))
         return
     airports = [a.upper() for a in context.args]
-    db.get_or_create_user(update.effective_chat.id)
     db.update_user_profile(update.effective_chat.id, origin_airports=airports)
-    await update.message.reply_text(f"✅ Departure airports set: {', '.join(airports)}")
+    await update.message.reply_text(t("set_origins_ok", lang, airports=", ".join(airports)))
 
 
 async def cmd_set_destinations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     if not context.args:
-        await update.message.reply_text("Usage: /set_destinations SVO DME KZN GOJ")
+        await update.message.reply_text(t("usage_set_destinations", lang))
         return
     airports = [a.upper() for a in context.args]
-    db.get_or_create_user(update.effective_chat.id)
     db.update_user_profile(update.effective_chat.id, destination_airports=airports)
-    await update.message.reply_text(f"✅ Destination airports set: {', '.join(airports)}")
+    await update.message.reply_text(t("set_destinations_ok", lang, airports=", ".join(airports)))
 
 
 async def cmd_set_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     if not context.args or len(context.args) != 2:
-        await update.message.reply_text("Usage: /set_dates YYYY-MM-DD YYYY-MM-DD")
+        await update.message.reply_text(t("usage_set_dates", lang))
         return
     from_date, to_date = context.args[0], context.args[1]
-    db.get_or_create_user(update.effective_chat.id)
     db.update_user_profile(update.effective_chat.id, depart_from=from_date, depart_to=to_date)
-    await update.message.reply_text(f"✅ Date window set: {from_date} → {to_date}")
+    await update.message.reply_text(t("set_dates_ok", lang, from_date=from_date, to_date=to_date))
 
 
 async def cmd_set_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     if not context.args or len(context.args) != 2:
-        await update.message.reply_text("Usage: /set_trip MIN_DAYS MAX_DAYS  (e.g. /set_trip 18 23)")
+        await update.message.reply_text(t("usage_set_trip", lang))
         return
     try:
         min_days = int(context.args[0])
         max_days = int(context.args[1])
     except ValueError:
-        await update.message.reply_text("Days must be integers.")
+        await update.message.reply_text(t("err_days_not_int", lang))
         return
     if min_days < 1 or max_days < min_days:
-        await update.message.reply_text("MIN_DAYS must be ≥ 1 and ≤ MAX_DAYS.")
+        await update.message.reply_text(t("err_min_max_days", lang))
         return
-    db.get_or_create_user(update.effective_chat.id)
     db.update_user_profile(update.effective_chat.id, trip_length_min=min_days, trip_length_max=max_days)
-    await update.message.reply_text(f"✅ Trip length set: {min_days}–{max_days} days")
+    await update.message.reply_text(t("set_trip_ok", lang, min=min_days, max=max_days))
 
 
 async def cmd_set_passengers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     if not context.args:
-        await update.message.reply_text(
-            "Usage: /set_passengers ADULTS [CHILD_AGES]\n"
-            "Examples:\n  /set_passengers 2\n  /set_passengers 2 5,9\n  /set_passengers 1 3"
-        )
+        await update.message.reply_text(t("usage_set_passengers", lang))
         return
     try:
         adults = int(context.args[0])
@@ -205,15 +306,13 @@ async def cmd_set_passengers(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if len(context.args) > 1:
             children_ages = [int(a) for a in context.args[1].split(",") if a.strip()]
     except ValueError:
-        await update.message.reply_text("Adults must be an integer; child ages must be comma-separated integers.")
+        await update.message.reply_text(t("err_adults_not_int", lang))
         return
     if adults < 1:
-        await update.message.reply_text("At least 1 adult required.")
+        await update.message.reply_text(t("err_adults_min", lang))
         return
-    db.get_or_create_user(update.effective_chat.id)
     db.update_user_profile(update.effective_chat.id, adults=adults, children_ages=children_ages)
-    from app.models import SearchProfile as SP
-    sp = SP(
+    sp = SearchProfile(
         origin_airports=[],
         destination_airports=[],
         depart_from=None,
@@ -224,29 +323,26 @@ async def cmd_set_passengers(update: Update, context: ContextTypes.DEFAULT_TYPE)
         children_ages=children_ages,
         max_connections=3,
     )
-    await update.message.reply_text(f"✅ Passengers set: {sp.passengers_description()}")
+    await update.message.reply_text(t("set_passengers_ok", lang, desc=sp.passengers_description(lang)))
 
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
     row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     profile = _get_profile(row)
     if not profile.is_ready():
         await update.message.reply_text(
-            "⚠️ Profile is incomplete. Please set:\n"
-            + ("/set\\_origins — departure airports\n" if not profile.origin_airports else "")
-            + ("/set\\_destinations — destination airports\n" if not profile.destination_airports else "")
-            + ("/set\\_dates — date window\n" if not profile.depart_from else ""),
-            parse_mode="Markdown",
+            t("search_incomplete", lang)
+            + (t("search_incomplete_add_origins", lang) if not profile.origin_airports else "")
+            + (t("search_incomplete_add_destinations", lang) if not profile.destination_airports else "")
+            + (t("search_incomplete_add_dates", lang) if not profile.depart_from else ""),
         )
         return
-    await update.message.reply_text(
-        "🔍 Searching for flights… This may take a minute or two — the AI is browsing the web for real prices.",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(t("searching_spinner", lang))
     result = await run_search(profile)
-    text = format_search_result(result, profile)
+    text = format_search_result(result, profile, lang)
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
@@ -254,53 +350,54 @@ async def cmd_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
     row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
     profile = _get_profile(row)
     if not profile.is_ready():
-        await update.message.reply_text(
-            "⚠️ Complete your search profile before enabling watch.\n/set_origins, /set_destinations, /set_dates"
-        )
+        await update.message.reply_text(t("watch_need_profile", lang))
         return
-    db.set_watch(update.effective_chat.id, enabled=True)
+    slot = row.get("active_profile_slot", 1)
+    db.set_watch(update.effective_chat.id, slot, enabled=True)
     tz = config.watch_timezone
     hour = config.watch_send_hour
     minute = config.watch_send_minute
-    await update.message.reply_text(
-        f"✅ Watch enabled. I will search for flights every day at {hour:02d}:{minute:02d} ({tz}) and send you the results."
-    )
+    await update.message.reply_text(t("watch_enabled", lang, hour=hour, minute=minute, tz=tz))
 
 
 async def cmd_watches(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
     row = db.get_or_create_user(update.effective_chat.id)
-    await update.message.reply_text(format_watch_status(row), parse_mode="Markdown")
+    await update.message.reply_text(format_watch_status(row, _lang(row)), parse_mode="Markdown")
 
 
 async def cmd_unwatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_auth(update):
         return
-    db.get_or_create_user(update.effective_chat.id)
-    db.set_watch(update.effective_chat.id, enabled=False)
-    await update.message.reply_text("⭕ Watch disabled.")
+    row = db.get_or_create_user(update.effective_chat.id)
+    lang = _lang(row)
+    slot = row.get("active_profile_slot", 1)
+    db.set_watch(update.effective_chat.id, slot, enabled=False)
+    await update.message.reply_text(t("watch_disabled", lang))
 
 
 async def _watch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Scheduled job: search for all users with watch enabled and send results."""
-    users = db.get_all_watch_users()
-    logger.info("Watch job: %d subscribed user(s)", len(users))
-    for row in users:
+    rows = db.get_all_watch_profiles()
+    logger.info("Watch job: %d subscribed profile(s)", len(rows))
+    for row in rows:
         chat_id = row["chat_id"]
+        slot = row["slot"]
+        lang = row.get("language", "en")
         profile = _get_profile(row)
         if not profile.is_ready():
-            logger.warning("Watch: user %d has incomplete profile, skipping", chat_id)
+            logger.warning("Watch: chat %d slot %d has incomplete profile, skipping", chat_id, slot)
             continue
         try:
             result = await run_search(profile)
-            text = format_search_result(result, profile)
+            text = format_search_result(result, profile, lang)
             await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-            db.mark_watch_run(chat_id)
+            db.mark_watch_run(chat_id, slot)
         except Exception as exc:
-            logger.exception("Watch job failed for chat %d: %s", chat_id, exc)
+            logger.exception("Watch job failed for chat %d slot %d: %s", chat_id, slot, exc)
 
 
 async def _post_init(application: Application) -> None:
@@ -320,6 +417,10 @@ def main() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("profile", cmd_profile))
+    app.add_handler(CommandHandler("language", cmd_language))
+    app.add_handler(CommandHandler("profiles", cmd_profiles))
+    app.add_handler(CommandHandler("rename", cmd_rename))
+    app.add_handler(CommandHandler("delete_profile", cmd_delete_profile))
     app.add_handler(CommandHandler("set_origins", cmd_set_origins))
     app.add_handler(CommandHandler("set_destinations", cmd_set_destinations))
     app.add_handler(CommandHandler("set_dates", cmd_set_dates))
@@ -329,6 +430,8 @@ def main() -> None:
     app.add_handler(CommandHandler("watch", cmd_watch))
     app.add_handler(CommandHandler("watches", cmd_watches))
     app.add_handler(CommandHandler("unwatch", cmd_unwatch))
+    app.add_handler(CallbackQueryHandler(cb_language, pattern="^lang_"))
+    app.add_handler(CallbackQueryHandler(cb_profiles, pattern="^profile_"))
 
     send_time = datetime.time(
         hour=config.watch_send_hour,
