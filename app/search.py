@@ -168,12 +168,12 @@ async def run_search(profile: SearchProfile, lang: str = "en") -> SearchResult:
             client = _get_client()
             input_text = _build_input(profile, lang)
             logger.info(
-                "OpenAI request: model=%s, context_size=%s, input_chars=%d",
+                "OpenAI request: model=%s, context_size=%s, input_chars=%d\n%s",
                 config.openai_model,
                 config.openai_search_context_size,
                 len(input_text),
+                input_text,
             )
-            logger.debug("OpenAI input:\n%s", input_text)
             response = await client.responses.create(
                 model=config.openai_model,
                 tools=[
