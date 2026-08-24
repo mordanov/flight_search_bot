@@ -16,11 +16,11 @@ def format_profile(profile: SearchProfile) -> str:
         return (
             "No search profile configured yet.\n\n"
             "Use these commands to set it up:\n"
-            "/set_origins — departure airports (IATA codes)\n"
-            "/set_destinations — destination airports\n"
-            "/set_dates — outbound date window\n"
-            "/set_trip — trip length range\n"
-            "/set_passengers — adults and children"
+            "/set\\_origins — departure airports (IATA codes)\n"
+            "/set\\_destinations — destination airports\n"
+            "/set\\_dates — outbound date window\n"
+            "/set\\_trip — trip length range\n"
+            "/set\\_passengers — adults and children"
         )
     lines = ["✈️ *Current search profile*\n"]
     if profile.origin_airports:

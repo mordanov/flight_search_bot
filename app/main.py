@@ -235,9 +235,9 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not profile.is_ready():
         await update.message.reply_text(
             "⚠️ Profile is incomplete. Please set:\n"
-            + ("/set_origins — departure airports\n" if not profile.origin_airports else "")
-            + ("/set_destinations — destination airports\n" if not profile.destination_airports else "")
-            + ("/set_dates — date window\n" if not profile.depart_from else ""),
+            + ("/set\\_origins — departure airports\n" if not profile.origin_airports else "")
+            + ("/set\\_destinations — destination airports\n" if not profile.destination_airports else "")
+            + ("/set\\_dates — date window\n" if not profile.depart_from else ""),
             parse_mode="Markdown",
         )
         return
