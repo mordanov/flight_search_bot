@@ -13,6 +13,7 @@ class Config(BaseSettings):
     watch_timezone: str = "Europe/Madrid"
     allowed_telegram_user_ids: str = ""
     max_profiles_per_user: int = 5
+    openai_max_concurrent_searches: int = 3
 
     @field_validator("openai_search_context_size")
     @classmethod
