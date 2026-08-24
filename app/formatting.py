@@ -1,6 +1,12 @@
 from app.models import FlightOption, SearchProfile, SearchResult
 
 _MEDAL = ["🥇", "🥈", "🥉"]
+
+
+def _esc(text: str) -> str:
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, "\\" + ch)
+    return text
 _MAX_MESSAGE_LENGTH = 4000  # Telegram limit is 4096; leave headroom
 _TRUNCATION_NOTE = "\n\n_... (message truncated — too long for Telegram)_"
 
@@ -18,15 +24,15 @@ def format_profile(profile: SearchProfile) -> str:
         )
     lines = ["✈️ *Current search profile*\n"]
     if profile.origin_airports:
-        lines.append(f"🛫 Departure: {' / '.join(profile.origin_airports)}")
+        lines.append(f"🛫 Departure: {' / '.join(_esc(a) for a in profile.origin_airports)}")
     else:
         lines.append("🛫 Departure: _(not set)_")
     if profile.destination_airports:
-        lines.append(f"🛬 Destination: {' / '.join(profile.destination_airports)}")
+        lines.append(f"🛬 Destination: {' / '.join(_esc(a) for a in profile.destination_airports)}")
     else:
         lines.append("🛬 Destination: _(not set)_")
     if profile.depart_from and profile.depart_to:
-        lines.append(f"📅 Outbound window: {profile.depart_from} → {profile.depart_to}")
+        lines.append(f"📅 Outbound window: {_esc(profile.depart_from)} → {_esc(profile.depart_to)}")
     else:
         lines.append("📅 Outbound window: _(not set)_")
     lines.append(
@@ -44,21 +50,21 @@ def _format_option(opt: FlightOption, index: int) -> str:
     status_icon = {"bookable": "✅", "schedule_only": "📋", "not_available_yet": "❌"}.get(
         opt.price_status, "❓"
     )
-    airlines = ", ".join(opt.airlines) if opt.airlines else "Unknown airline"
+    airlines = ", ".join(_esc(a) for a in opt.airlines) if opt.airlines else "Unknown airline"
     lines = [
         f"{medal} *€{opt.total_price_eur:,.0f} total* {status_icon}",
-        f"{opt.outbound_date} → {opt.return_date}",
-        f"{opt.outbound_route}",
-        f"Return: {opt.return_route}",
+        f"{_esc(opt.outbound_date)} → {_esc(opt.return_date)}",
+        f"{_esc(opt.outbound_route)}",
+        f"Return: {_esc(opt.return_route)}",
         f"{airlines}",
-        f"Out: {opt.outbound_duration} ({opt.outbound_connections} stop{'s' if opt.outbound_connections != 1 else ''})"
-        f" | Ret: {opt.return_duration} ({opt.return_connections} stop{'s' if opt.return_connections != 1 else ''})",
-        f"🧳 {opt.baggage}",
+        f"Out: {_esc(opt.outbound_duration)} ({opt.outbound_connections} stop{'s' if opt.outbound_connections != 1 else ''})"
+        f" | Ret: {_esc(opt.return_duration)} ({opt.return_connections} stop{'s' if opt.return_connections != 1 else ''})",
+        f"🧳 {_esc(opt.baggage)}",
     ]
     if opt.booking_url and opt.booking_url not in ("not available", ""):
-        lines.append(f"🔗 {opt.booking_url}")
+        lines.append(f"🔗 {_esc(opt.booking_url)}")
     if opt.notes:
-        lines.append(f"ℹ️ _{opt.notes}_")
+        lines.append(f"ℹ️ _{_esc(opt.notes)}_")
     return "\n".join(lines)
 
 
