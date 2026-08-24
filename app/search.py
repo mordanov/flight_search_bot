@@ -81,7 +81,16 @@ matching this exact schema:
 """
 
 
-def _build_input(profile: SearchProfile) -> str:
+_LANG_INSTRUCTION = {
+    "ru": (
+        'LANGUAGE: Write the "message" field in Russian. '
+        "All other fields (airline names, airport codes, routes, durations) must remain in English."
+    ),
+    "en": "",
+}
+
+
+def _build_input(profile: SearchProfile, lang: str = "en") -> str:
     origins = ", ".join(profile.origin_airports)
     destinations = ", ".join(profile.destination_airports)
     passengers_line = profile.passengers_description()
@@ -93,6 +102,7 @@ def _build_input(profile: SearchProfile) -> str:
         )
     else:
         child_note = ""
+    lang_note = _LANG_INSTRUCTION.get(lang, "")
 
     return f"""\
 APPLICATION SEARCH PARAMETERS:
@@ -108,6 +118,7 @@ Optimization target: lowest TOTAL price for ALL passengers combined
 
 Search across all departure airports and all destinations. Compare transit hubs.
 Rank results by combined total price, ascending.
+{lang_note}
 {_RESULT_SCHEMA_PROMPT}"""
 
 
@@ -149,12 +160,20 @@ def _parse_result(raw: str) -> SearchResult:
     return SearchResult(**data)
 
 
-async def run_search(profile: SearchProfile) -> SearchResult:
+async def run_search(profile: SearchProfile, lang: str = "en") -> SearchResult:
     """Run a flight search using the OpenAI Responses API with web_search."""
     async with _search_lock:
         timestamp = datetime.now(timezone.utc).isoformat()
         try:
             client = _get_client()
+            input_text = _build_input(profile, lang)
+            logger.info(
+                "OpenAI request: model=%s, context_size=%s, input_chars=%d",
+                config.openai_model,
+                config.openai_search_context_size,
+                len(input_text),
+            )
+            logger.debug("OpenAI input:\n%s", input_text)
             response = await client.responses.create(
                 model=config.openai_model,
                 tools=[
@@ -164,9 +183,15 @@ async def run_search(profile: SearchProfile) -> SearchResult:
                     }
                 ],
                 instructions=_SYSTEM_INSTRUCTION,
-                input=_build_input(profile),
+                input=input_text,
             )
             raw_text = _extract_output_text(response)
+            logger.info(
+                "OpenAI response: output_chars=%d, preview=%.300s",
+                len(raw_text),
+                raw_text,
+            )
+            logger.debug("OpenAI full output:\n%s", raw_text)
             if not raw_text.strip():
                 logger.error("OpenAI returned empty output")
                 return SearchResult(

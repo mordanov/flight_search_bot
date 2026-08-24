@@ -36,7 +36,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "language_set_ru": "🇷🇺 Язык изменён на русский.",
         "usage_set_origins": "Usage: /set_origins MAD VLC ALC AGP",
         "usage_set_destinations": "Usage: /set_destinations SVO DME KZN GOJ",
-        "usage_set_dates": "Usage: /set_dates YYYY-MM-DD YYYY-MM-DD",
+        "usage_set_dates": "Usage: /set_dates YYYY-MM-DD YYYY-MM-DD  (e.g. /set_dates 2027-06-24 2027-07-31)",
+        "err_invalid_date": "Invalid date format. Use YYYY-MM-DD, e.g. /set_dates 2027-06-24 2027-07-31",
         "usage_set_trip": "Usage: /set_trip MIN_DAYS MAX_DAYS  (e.g. /set_trip 18 23)",
         "usage_set_passengers": (
             "Usage: /set_passengers ADULTS [CHILD_AGES]\n"
@@ -140,7 +141,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "language_set_ru": "🇷🇺 Язык изменён на русский.",
         "usage_set_origins": "Использование: /set_origins MAD VLC ALC",
         "usage_set_destinations": "Использование: /set_destinations SVO DME KZN",
-        "usage_set_dates": "Использование: /set_dates ГГГГ-ММ-ДД ГГГГ-ММ-ДД",
+        "usage_set_dates": "Использование: /set_dates YYYY-MM-DD YYYY-MM-DD  (например: /set_dates 2027-06-24 2027-07-31)",
+        "err_invalid_date": "Неверный формат даты. Используйте YYYY-MM-DD, например: /set_dates 2027-06-24 2027-07-31",
         "usage_set_trip": "Использование: /set_trip МИН МАКС  (например: /set_trip 18 23)",
         "usage_set_passengers": (
             "Использование: /set_passengers ВЗРОСЛЫХ [ВОЗРАСТ_ДЕТЕЙ]\n"
